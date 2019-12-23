@@ -140,10 +140,16 @@ class ScannetDataset(Dataset):
         # Path of the folder containing ply files
         self.path = 'Data/Scannet'
 
-
         # Path of the training files
         self.train_path = join(self.path, 'training_points')
         self.test_path = join(self.path, 'test_points')
+
+        # Prepare ply files
+        self.prepare_pointcloud_ply()
+
+        # List of training and test files
+        self.train_files = np.sort([join(self.train_path, f) for f in listdir(self.train_path) if f[-4:] == '.ply'])
+        self.test_files = np.sort([join(self.test_path, f) for f in listdir(self.test_path) if f[-4:] == '.ply'])
 
         # Proportion of validation scenes
         self.validation_clouds = np.loadtxt(join(self.path, 'scannet_v2_val.txt'), dtype=np.str)
@@ -155,12 +161,6 @@ class ScannetDataset(Dataset):
         # Load test set or train set?
         self.load_test = load_test
 
-        ###################
-        # Prepare ply files
-        ###################
-
-        self.prepare_pointcloud_ply()
-
     def prepare_pointcloud_ply(self):
 
         print('\nPreparing ply files')
@@ -170,7 +170,6 @@ class ScannetDataset(Dataset):
         paths = [join(self.path, 'scans'), join(self.path, 'scans_test')]
         new_paths = [self.train_path, self.test_path]
         mesh_paths = [join(self.path, 'training_meshes'), join(self.path, 'test_meshes')]
-
 
         # Mapping from annot to NYU labels ID
         label_files = join(self.path, 'scannetv2-labels.combined.tsv')
@@ -218,7 +217,7 @@ class ScannetDataset(Dataset):
                     for line in lines:
                         line = line.split()
                         if line[0] == 'axisAlignment':
-                            align_mat = np.array([float(x) for x in line[2:]]).reshape([4, 4]).astype(np.int32)
+                            align_mat = np.array([float(x) for x in line[2:]]).reshape([4, 4]).astype(np.float32)
                     R = align_mat[:3, :3]
                     T = align_mat[:3, 3]
                     vertices = vertices.dot(R.T) + T
@@ -305,11 +304,7 @@ class ScannetDataset(Dataset):
         if not exists(tree_path):
             makedirs(tree_path)
 
-        # List of training files
-        self.train_files = np.sort([join(self.train_path, f) for f in listdir(self.train_path) if f[-4:] == '.ply'])
-
-        # Add test files
-        self.test_files = np.sort([join(self.test_path, f) for f in listdir(self.test_path) if f[-4:] == '.ply'])
+        # All training and test files
         files = np.hstack((self.train_files, self.test_files))
 
         # Initiate containers
@@ -460,25 +455,8 @@ class ScannetDataset(Dataset):
                     labels = vertex_data['class']
 
                     # Compute projection inds
-                    inds = np.squeeze(self.input_trees['validation'][i_val].query(vertices, return_distance=False))
-                    proj_inds = [[] for _ in range(self.input_labels['validation'][i_val].shape[0])]
-                    for o_ind, sub_ind in enumerate(inds):
-                        proj_inds[sub_ind] += [o_ind]
-                    proj_inds = np.array([np.array(ind_list, dtype=np.int32) for ind_list in proj_inds])
-
-                    """
-                    # Projection inds already computed for majority of vert indices
-                    proj_inds = [[vert_ind] for vert_ind in self.input_vert_inds['validation'][i_val]]
-
-                    # For mesh inds that do not have a point in the cloud projecting to them (with vert_inds), add
-                    # nearest neighbor projection
-                    unprojected_verts = np.where(np.bincount(self.input_vert_inds['validation'][i_val]) == 0)[0]
-                    inds = np.squeeze(self.input_trees['validation'][i_val].query(vertices[unprojected_verts, :],
-                                                                                  return_distance=False))
-                    for o_ind, sub_ind in zip(unprojected_verts, inds):
-                        proj_inds[sub_ind] += [o_ind]
-                    proj_inds = np.array([np.array(ind_list, dtype=np.int32) for ind_list in proj_inds])
-                    """
+                    proj_inds = np.squeeze(self.input_trees['validation'][i_val].query(vertices, return_distance=False))
+                    proj_inds = proj_inds.astype(np.int32)
 
                     # Save
                     with open(proj_file, 'wb') as f:
@@ -504,25 +482,8 @@ class ScannetDataset(Dataset):
                     labels = np.zeros(vertices.shape[0], dtype=np.int32)
 
                     # Compute projection inds
-                    inds = np.squeeze(self.input_trees['test'][i_test].query(vertices, return_distance=False))
-                    proj_inds = [[] for _ in range(self.input_trees['test'][i_test].data.shape[0])]
-                    for o_ind, sub_ind in enumerate(inds):
-                        proj_inds[sub_ind] += [o_ind]
-                    proj_inds = np.array([np.array(ind_list, dtype=np.int32) for ind_list in proj_inds])
-
-                    """
-                    # Projection inds already computed for majority of vert indices
-                    proj_inds = [[vert_ind] for vert_ind in self.input_vert_inds['test'][i_test]]
-
-                    # For mesh inds that do not have a point in the cloud projecting to them (with vert_inds), add
-                    # nearest neighbor projection
-                    unprojected_verts = np.where(np.bincount(self.input_vert_inds['test'][i_test]) == 0)[0]
-                    inds = np.squeeze(self.input_trees['test'][i_test].query(vertices[unprojected_verts, :],
-                                                                                  return_distance=False))
-                    for o_ind, sub_ind in zip(unprojected_verts, inds):
-                        proj_inds[sub_ind] += [o_ind]
-                    proj_inds = np.array([np.array(ind_list, dtype=np.int32) for ind_list in proj_inds])
-                    """
+                    proj_inds = np.squeeze(self.input_trees['test'][i_test].query(vertices, return_distance=False))
+                    proj_inds = proj_inds.astype(np.int32)
 
                     with open(proj_file, 'wb') as f:
                         pickle.dump([proj_inds, labels], f)
@@ -759,7 +720,6 @@ class ScannetDataset(Dataset):
                     pick_point = center_point + noise.astype(center_point.dtype)
                 else:
                     pick_point = center_point
-
 
                 # Indices of points in input region
                 input_inds = self.input_trees[data_split][cloud_ind].query_radius(pick_point,
